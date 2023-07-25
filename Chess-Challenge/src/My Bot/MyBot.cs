@@ -5,7 +5,12 @@ using ChessChallenge.API;
 public class MyBot : IChessBot
 {
     // Piece values: none, pawn, knight, bishop, rook, queen, king, maps to PieceType enum as int
-    int[] pieceValues = { 0, 100, 280, 320, 479, 929, 60000 };
+    static readonly int[] pieceValues = { 0, 100, 280, 320, 479, 929, 60000 };
+    Board board;
+    const int posInf = 1_000_000_000;
+    const int negInf = -posInf;
+    // Choose random move as start move
+    Random rng = new(1234);
 
     // PST Piece Square Table: Pawn, Knight, Bishop, Rook, Queen, King
     static readonly short[] PieceSquareTable = new short[]
@@ -76,11 +81,12 @@ public class MyBot : IChessBot
 
 
     int moveCount = 0; // Track how many moves were made when searching
+    int pruneCount = 0;
 
     // Return a int score for given board position, for the piece to play currently
     public int Evaluate(Board board, bool doCaptures = true, int exchangeDepth = 3)
     {
-        if (board.IsInCheckmate()) { return int.MinValue; } // Lose
+        if (board.IsInCheckmate()) { return negInf; } // Lose
         else if (board.IsDraw()) { return 0; } // Draw
         // Else, count up the pieces by their values and return the sum.
         // PieceList[] piecelists = board.GetAllPieceLists();
@@ -141,6 +147,8 @@ public class MyBot : IChessBot
         // Calculate score, positive means better for side whose turn it is.
         // Initially calculated where negative means better for black, positive for white.
         // int score = GetBoardScore(board);
+        if (!doCaptures) return GetBoardScore(board, true); // Return board score no exchanges
+
         return ExchangeCalculator(board, exchangeDepth);
 
         // Revert all the capture moves (Note: only check side to move after reverting)
@@ -172,7 +180,7 @@ public class MyBot : IChessBot
                 score -= pieceValues[i+1] + GetPieceSquareTableValue(piece.PieceType, piece.Square.Rank, piece.Square.File, false);
             }
         }
-        if (board.IsInCheckmate()) { score = board.IsWhiteToMove ? int.MinValue : int.MaxValue; } // Lose for side
+        if (board.IsInCheckmate()) { score = board.IsWhiteToMove ? negInf : posInf; } // Lose for side
         else if (board.IsDraw()) { score = 0; } // Draw
         if (positiveForSide) return board.IsWhiteToMove? score : -score; // Positive for side if preferred
         return score;
@@ -217,62 +225,65 @@ public class MyBot : IChessBot
     }
 
     // Use negamax search
-    public (int, Move, Move) Search(Board board, int maxPly = 1)
+    public (int, Move, Move) Search(int maxPly, int alpha, int beta)
     {
-        if (maxPly == 0)
+        if (board.IsInCheckmate() || board.IsDraw() || maxPly == 0)
         {
             return (Evaluate(board), Move.NullMove, Move.NullMove);
         }
         // Evaluate score of board assuming optimal choices up to a maxPly.
         Move[] allMoves = board.GetLegalMoves();
-        if (allMoves.Length == 0)
-        {
-            // No legal moves here, means we're in check or stalemate.
-            return (Evaluate(board), Move.NullMove, Move.NullMove);
-        }
+        // if (allMoves.Length == 0)
+        // {
+        //     // No legal moves here, means we're in check or stalemate.
+        //     return (Evaluate(board), Move.NullMove, Move.NullMove);
+        // }
         Move moveToPlay = Move.NullMove;
         Move expected_response = Move.NullMove;
-        int bestScore = int.MinValue;
 
-        // Choose random move as start move
-        Random rng = new();
+        
         
         String side = board.IsWhiteToMove ? "WHITE" : "BLACK";
         // if (maxPly >= 2) {
         //     String allMovesStr = String.Join(", ", allMoves);
-        //     Console.WriteLine($"Search({maxPly} ply - {side} - Have {allMoves.Length} moves: {allMovesStr})");
+        //     Console.WriteLine($"Search({maxPly} ply, {alpha} A, {beta} B) - {side} - Have {allMoves.Length} moves: {allMovesStr}");
         // }
 
         foreach (Move move in allMoves)
         {
             // Make move and recursively get negative negamax score (for opponent) to maxPly
             board.MakeMove(move);
-            if (board.IsInCheckmate())
-            {
-                board.UndoMove(move);
-                // This put opponent in checkmate, consider this the best move and break out.
-                moveToPlay = move;
-                expected_response = Move.NullMove;
-                bestScore = int.MaxValue;
-                break;
-            }
-            // if (maxPly >= 2) Console.WriteLine($" ({maxPly} ply - {side}) - {move} - Recursive Search down");
-            (int score, Move next_move, Move next_move_response) = Search(board, maxPly - 1);
+            // if (board.IsInCheckmate())
+            // {
+            //     board.UndoMove(move);
+            //     // This put opponent in checkmate, consider this the best move and break out.
+            //     moveToPlay = move;
+            //     expected_response = Move.NullMove;
+            //     bestScore = posInf;
+            //     break;
+            // }
+            // if (maxPly >= 0) Console.WriteLine($" ({maxPly} ply - {side}) - {move} - Recursive Search down");
+            (int score, Move next_move, Move next_move_response) = Search(maxPly - 1, -beta, -alpha);
+            score = -score; // invert since opponents best score is our worst.
             board.UndoMove(move);
-            score = -score; // invert for negamax, opponents best score is our worst.
-            moveCount += 1;
+            moveCount++;
             // if (maxPly >= 2) Console.WriteLine($" ({maxPly} ply - {side}) - {move} - End Recursive Search down, score {score}");
 
-            // + score is better for current player
-            // If the scores are equal, just randomly choose the next option sometimes.
-            // This is pretty arbitrary, but mixes things up a bit
-            if (score > bestScore) // || (score == bestScore && rng.Next(0, 100) > 50))
-            {
+            if (score > alpha || (score == alpha && moveToPlay == Move.NullMove)) // || (score == alpha && rng.Next(0, 100) > 50))
+            { 
+                // New best move
+                int prevAlpha = alpha;
+                alpha = score;
                 moveToPlay = move;
                 expected_response = next_move;
-                // int prevBestScore = bestScore;
-                bestScore = score;
-                // if (maxPly >= 2 && move.IsCapture) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  prev {prevBestScore} new best {bestScore} response {next_move}");
+                // if (maxPly >= 0 && board.SquareIsAttackedByOpponent(move.StartSquare)) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  prev {prevAlpha} new alpha {alpha} response {next_move}");
+            }
+            if (alpha >= beta) {
+                // Move too good, opponent avoids.
+                // return (bestScore, moveToPlay, expected_response);
+                // if (maxPly >= 0 && board.SquareIsAttackedByOpponent(move.StartSquare)) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  Prune curr {alpha} {beta} vs score {score}");
+                pruneCount++;
+                break;
             }
             // capture D8D5
             // if (maxPly >= 2 && move.StartSquare.File == 3 && move.StartSquare.Rank == 7
@@ -281,21 +292,22 @@ public class MyBot : IChessBot
             // }
         }
         // if (maxPly >= 2) {
-        //     Console.WriteLine($" Found (score {bestScore}) {moveToPlay} expecting {expected_response}");
-        //     Console.WriteLine($"End Search({maxPly} ply - {side})");
+        //     Console.WriteLine($"End Search({maxPly} ply - {side}) - Found (score {alpha}) {moveToPlay} expecting {expected_response}");
         // }
-        return (bestScore, moveToPlay, expected_response);
+        return (alpha, moveToPlay, expected_response);
     }
 
     public Move Think(Board board, Timer timer)
     {
         moveCount = 0;
+        pruneCount = 0;
         int maxPly = 3;
-        // Console.WriteLine($"\n---- NEW THINK {board.GetFenString()} \n");
+        this.board = board;
+        // Console.WriteLine($"---- NEW THINK {board.GetFenString()}");
         int curScore = Evaluate(board);
-        (int bestScore, Move moveToPlay, Move expected_response) = Search(board, maxPly);
+        (int bestScore, Move moveToPlay, Move expected_response) = Search(maxPly, negInf, posInf);
         // Console.WriteLine(board.GetFenString());
-        Console.WriteLine($"Searched {moveCount} moves in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response}");
+        Console.WriteLine($"Searched {moveCount} moves (pruned {pruneCount}) in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response}");
 
         return moveToPlay;
         
