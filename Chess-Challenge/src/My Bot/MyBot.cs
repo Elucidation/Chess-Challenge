@@ -7,6 +7,7 @@ public class MyBot : IChessBot
     // Piece values: none, pawn, knight, bishop, rook, queen, king, maps to PieceType enum as int
     static readonly int[] pieceValues = { 0, 100, 280, 320, 479, 929, 60000 };
     Board board;
+    int exchangeDepth = 3;
     const int posInf = 1_000_000_000;
     const int negInf = -posInf;
     // Choose random move as start move
@@ -84,7 +85,7 @@ public class MyBot : IChessBot
     int pruneCount = 0;
 
     // Return a int score for given board position, for the piece to play currently
-    public int Evaluate(Board board, bool doCaptures = true, int exchangeDepth = 3)
+    public int Evaluate(Board board, bool doCaptures = true)
     {
         if (board.IsInCheckmate()) { return negInf; } // Lose
         else if (board.IsDraw()) { return 0; } // Draw
@@ -301,7 +302,19 @@ public class MyBot : IChessBot
     {
         moveCount = 0;
         pruneCount = 0;
-        int maxPly = 3;
+        int maxPly = 4;
+        // Drop search depth as less time remains
+        if (timer.MillisecondsRemaining < 1) {
+            maxPly = 1;
+            exchangeDepth = 0;
+        } else if (timer.MillisecondsRemaining < 10) {
+            maxPly = 2;
+            exchangeDepth = 1;
+        } else if (timer.MillisecondsRemaining < 30) {
+            maxPly = 3;
+            exchangeDepth = 2;
+        }
+        
         this.board = board;
         // Console.WriteLine($"---- NEW THINK {board.GetFenString()}");
         int curScore = Evaluate(board);
