@@ -7,7 +7,7 @@ public class MyBot : IChessBot
     // Piece values: none, pawn, knight, bishop, rook, queen, king, maps to PieceType enum as int
     static readonly int[] pieceValues = { 0, 100, 280, 320, 479, 929, 60000 };
     Board board;
-    int exchangeDepth = 3;
+    int exchangeDepth = 1_000;
     const int posInf = 1_000_000_000;
     const int negInf = -posInf;
     // Choose random move as start move
@@ -83,88 +83,23 @@ public class MyBot : IChessBot
 
     int moveCount = 0; // Track how many moves were made when searching
     int pruneCount = 0;
+    int exchangeCount = 0; // Track how many exchanges were made when searching
+    int exchangePruneCount = 0;
 
     // Return a int score for given board position, for the piece to play currently
-    public int Evaluate(Board board, bool doCaptures = true)
+    public int Evaluate(int alpha, int beta)
     {
-        if (board.IsInCheckmate()) { return negInf; } // Lose
-        else if (board.IsDraw()) { return 0; } // Draw
-        // Else, count up the pieces by their values and return the sum.
-        // PieceList[] piecelists = board.GetAllPieceLists();
-
-        // List<Move> tracked_moves = new List<Move>(); // 
-        // bool didCapture = true;
-        // Move[] capture_moves;
-        // // Swap Material of > value or undefended until no material is left.
-        // // Keep doing this till no more valid captures exist.
-        // // Only keep going if a valid capture happened
-        // // Note, this follows the chain of the first valid capture, it doesn't try the others,
-        // // so this is not optimal, but it is simpler and okay for a first pass heuristic.)
-        // while (doCaptures && didCapture)
-        // {
-        //     capture_moves = board.GetLegalMoves(true);
-        //     didCapture = false;
-        //     int best_capture_value = 0;
-        //     Move best_capture_move = Move.NullMove;
-        //     foreach (Move capture_move in capture_moves)
-        //     {
-        //         if (capture_move.IsNull) continue;
-        //         var piece_capturing = board.GetPiece(capture_move.StartSquare);
-        //         var piece_captured = board.GetPiece(capture_move.TargetSquare);
-        //         int capture_value;
-        //         if (!board.SquareIsAttackedByOpponent(capture_move.TargetSquare)) {
-        //             // Free piece, full value of captured piece (or pawn if en-passant)
-        //             capture_value = capture_move.IsEnPassant ? pieceValues[(int)PieceType.Pawn] : pieceValues[(int)piece_captured.PieceType];
-        //         } 
-        //         else 
-        //         {
-        //             // Better trade, difference in piece values
-        //             capture_value = pieceValues[(int)piece_captured.PieceType] - pieceValues[(int)piece_capturing.PieceType];
-        //         }
-        //         // Console.WriteLine($"{piece_capturing} {pieceValues[(int)piece_capturing.PieceType]} -> {piece_captured} {pieceValues[(int)piece_captured.PieceType]}");
-        //         // Do the first capture that improves the position.
-        //         if (capture_value > best_capture_value)
-        //         {
-        //             best_capture_value = capture_value; // Replace with new best capture
-        //             best_capture_move = capture_move;
-        //             // String current_side = board.IsWhiteToMove ? "WHITE" : "BLACK";
-        //             // Console.WriteLine($"{tracked_moves.Count} {current_side} - Making capture {capture_move} {piece_capturing} takes {piece_captured} {board.GetFenString()}");
-        //             // tracked_moves.Add(capture_move);
-        //             // board.MakeMove(capture_move);
-        //             didCapture = true;
-        //             // break;
-        //         }
-        //     }
-        //     if (didCapture) {
-        //         // String current_side = board.IsWhiteToMove ? "WHITE" : "BLACK";
-        //         // var piece_capturing = board.GetPiece(best_capture_move.StartSquare);
-        //         // var piece_captured = board.GetPiece(best_capture_move.TargetSquare);
-        //         // Console.WriteLine($"{tracked_moves.Count} {current_side} - Making capture {best_capture_move} {piece_capturing} takes {piece_captured} {board.GetFenString()}");
-        //         tracked_moves.Add(best_capture_move);
-        //         board.MakeMove(best_capture_move);
-        //     }
-        // }
-
-        // Calculate score, positive means better for side whose turn it is.
-        // Initially calculated where negative means better for black, positive for white.
-        // int score = GetBoardScore(board);
-        if (!doCaptures) return GetBoardScore(board, true); // Return board score no exchanges
-
-        return ExchangeCalculator(board, exchangeDepth);
-
-        // Revert all the capture moves (Note: only check side to move after reverting)
-        // tracked_moves.Reverse();
-        // foreach (Move capture_move in tracked_moves)
-        // {
-        //     board.UndoMove(capture_move);
-        // }
-        // return board.IsWhiteToMove ? score : -score; // Positive score for side playing
+        // Console.WriteLine($"Evaluate({alpha} A, {beta} B) - {board.IsWhiteToMove}");
+        if (board.IsInCheckmate()) return negInf; // Lose
+        else if (board.IsDraw()) return 0; // Draw
+        return ExchangeCalculator(exchangeDepth, alpha, beta);
     }
-    public int GetBoardScore(Board board, bool positiveForSide=false) {
-        // Returns score of board, - is favoring black, + is favoring white
-        // If positiveForSide is true, then + favors current side to play
+    public int GetBoardScore() {
+        // Returns score of board, + favors current side to play
         // Calculate score, positive means better for side whose turn it is.
         // Initially calculated where negative means better for black, positive for white.
+        if (board.IsInCheckmate()) return negInf; // Lose for side
+        else if (board.IsDraw()) return 0; // Draw
         int score = 0;
         PieceList[] piecelists = board.GetAllPieceLists();
         // White pieces +, Black pieces -
@@ -181,48 +116,54 @@ public class MyBot : IChessBot
                 score -= pieceValues[i+1] + GetPieceSquareTableValue(piece.PieceType, piece.Square.Rank, piece.Square.File, false);
             }
         }
-        if (board.IsInCheckmate()) { score = board.IsWhiteToMove ? negInf : posInf; } // Lose for side
-        else if (board.IsDraw()) { score = 0; } // Draw
-        if (positiveForSide) return board.IsWhiteToMove? score : -score; // Positive for side if preferred
-        return score;
+        return board.IsWhiteToMove? score : -score; // Positive for side if preferred
     }
 
-    public int ExchangeCalculator(Board board, int depth) {
+    public int ExchangeCalculator(int depth, int alpha, int beta) {
         // Returns score for swapping down capturable material or not capturing if it's worse.
         // positive favors side to play on board.
-        int score = GetBoardScore(board, true);
+        int score = GetBoardScore();
         // Console.WriteLine($"Exchange(depth={depth}) - init score {score} - {board.GetFenString()}");
-        if (depth == 0) {
-            // Don't go deeper, just return score of board currently.
+        String side = board.IsWhiteToMove ? "WHITE" : "BLACK";
+        // Console.WriteLine($"ExchangeCalculator({depth} depth, {alpha} A, {beta} B) - {side} - Have {board.GetLegalMoves(true).Length} captures available");
+        if (depth == 0 || score >= beta) {
+            // Console.WriteLine($"score {score} >= beta {beta}, dropping out early.");
             return score;
         }
+        alpha = Math.Max(alpha, score);
+        
+
+        // Search through only capturing moves
         foreach (Move capture_move in board.GetLegalMoves(true))
         {
-            if (capture_move.IsNull) continue;
             var piece_capturing = board.GetPiece(capture_move.StartSquare);
             var piece_captured = board.GetPiece(capture_move.TargetSquare);
-            int capture_value;
-            if (!board.SquareIsAttackedByOpponent(capture_move.TargetSquare)) {
-                // Free piece, full value of captured piece (or pawn if en-passant)
-                capture_value = capture_move.IsEnPassant ? pieceValues[(int)PieceType.Pawn] : pieceValues[(int)piece_captured.PieceType];
-            } 
-            else 
-            {
-                // Better trade, difference in piece values
-                capture_value = pieceValues[(int)piece_captured.PieceType] - pieceValues[(int)piece_capturing.PieceType];
+            // Skip moves that are worse or equal trades, this is inaccurate but saves a lot of time
+            if ((pieceValues[(int)piece_captured.PieceType] <= pieceValues[(int)piece_capturing.PieceType])) continue;
+
+            // Console.WriteLine($"Exchange(depth={depth}) {side} - Potential capture {capture_move} - A {alpha} B {beta}");
+            // Appear to have something to gain, see if the score improves with capture or not.
+            board.MakeMove(capture_move);
+            // Negate for opponent, alpha-beta pruning
+            int new_score = -ExchangeCalculator(depth-1, -beta, -alpha);
+            board.UndoMove(capture_move);
+            exchangeCount++;
+            // Console.WriteLine($"  Score {new_score}");
+            if (new_score >= beta) {
+                // Move too good, opponent avoids.
+                exchangePruneCount++;
+                // Console.WriteLine($"Exchange(depth={depth}) {side} - Pruning at {capture_move} {new_score} >= {beta}");
+                return beta;
             }
-            if (capture_value > 0) {
-                // Appear to have something to gain, see if the score improves with capture or not.
-                board.MakeMove(capture_move);
-                int new_score = -ExchangeCalculator(board, depth-1); // Negative because it's opponent's score
-                board.UndoMove(capture_move);
-                // if (new_score > score) {
-                //     Console.WriteLine($"Exchange(depth={depth}) - doing capture {capture_value} - score {score} -> {new_score} {piece_capturing} {pieceValues[(int)piece_capturing.PieceType]} -> {piece_captured} {pieceValues[(int)piece_captured.PieceType]}");
-                // }
-                score = Math.Max(score, new_score); // Only capture if it improves score.
+            if (new_score > alpha) {
+                // Console.WriteLine($"Exchange(depth={depth}) {side} - doing capture {capture_move} - alpha {alpha} -> {new_score}");
+                //  {piece_capturing} {pieceValues[(int)piece_capturing.PieceType]} -> {piece_captured} {pieceValues[(int)piece_captured.PieceType]}");
+                alpha = new_score;
             }
+            
+            // alpha = Math.Max(alpha, new_score); // New best capture
         }
-        return score;
+        return alpha;
     }
 
     // Use negamax search
@@ -230,20 +171,12 @@ public class MyBot : IChessBot
     {
         if (board.IsInCheckmate() || board.IsDraw() || maxPly == 0)
         {
-            return (Evaluate(board), Move.NullMove, Move.NullMove);
+            return (Evaluate(alpha, beta), Move.NullMove, Move.NullMove);
         }
         // Evaluate score of board assuming optimal choices up to a maxPly.
         Move[] allMoves = board.GetLegalMoves();
-        // if (allMoves.Length == 0)
-        // {
-        //     // No legal moves here, means we're in check or stalemate.
-        //     return (Evaluate(board), Move.NullMove, Move.NullMove);
-        // }
-        Move moveToPlay = Move.NullMove;
+        Move moveToPlay = allMoves[0]; // If all moves are losing, just play first one.
         Move expected_response = Move.NullMove;
-
-        
-        
         String side = board.IsWhiteToMove ? "WHITE" : "BLACK";
         // if (maxPly >= 2) {
         //     String allMovesStr = String.Join(", ", allMoves);
@@ -254,23 +187,20 @@ public class MyBot : IChessBot
         {
             // Make move and recursively get negative negamax score (for opponent) to maxPly
             board.MakeMove(move);
-            // if (board.IsInCheckmate())
-            // {
-            //     board.UndoMove(move);
-            //     // This put opponent in checkmate, consider this the best move and break out.
-            //     moveToPlay = move;
-            //     expected_response = Move.NullMove;
-            //     bestScore = posInf;
-            //     break;
-            // }
-            // if (maxPly >= 0) Console.WriteLine($" ({maxPly} ply - {side}) - {move} - Recursive Search down");
-            (int score, Move next_move, Move next_move_response) = Search(maxPly - 1, -beta, -alpha);
+            // if (maxPly >= 0) Console.WriteLine($" ({maxPly} ply - {side}) - {move} ({alpha} A, {beta} B) - Recursive Search down");
+            (int score, Move next_move, _) = Search(maxPly - 1, -beta, -alpha);
             score = -score; // invert since opponents best score is our worst.
             board.UndoMove(move);
             moveCount++;
             // if (maxPly >= 2) Console.WriteLine($" ({maxPly} ply - {side}) - {move} - End Recursive Search down, score {score}");
 
-            if (score > alpha || (score == alpha && moveToPlay == Move.NullMove)) // || (score == alpha && rng.Next(0, 100) > 50))
+            if (score >= beta) {
+                // Move too good, opponent avoids.
+                // if (maxPly >= 0 && board.SquareIsAttackedByOpponent(move.StartSquare)) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  Prune curr {alpha} {beta} vs score {score}");
+                pruneCount++;
+                return (beta, move, Move.NullMove);
+            }
+            if (score > alpha) // Note: because of pruning can't choose alternatives score==alpha here as it may be a bad prune?
             { 
                 // New best move
                 int prevAlpha = alpha;
@@ -279,13 +209,7 @@ public class MyBot : IChessBot
                 expected_response = next_move;
                 // if (maxPly >= 0 && board.SquareIsAttackedByOpponent(move.StartSquare)) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  prev {prevAlpha} new alpha {alpha} response {next_move}");
             }
-            if (alpha >= beta) {
-                // Move too good, opponent avoids.
-                // return (bestScore, moveToPlay, expected_response);
-                // if (maxPly >= 0 && board.SquareIsAttackedByOpponent(move.StartSquare)) Console.WriteLine($" ({maxPly} ply - {side}) - {move} -  Prune curr {alpha} {beta} vs score {score}");
-                pruneCount++;
-                break;
-            }
+            
             // capture D8D5
             // if (maxPly >= 2 && move.StartSquare.File == 3 && move.StartSquare.Rank == 7
             //                 && move.TargetSquare.File == 3 && move.TargetSquare.Rank == 4) {
@@ -302,25 +226,28 @@ public class MyBot : IChessBot
     {
         moveCount = 0;
         pruneCount = 0;
+        exchangeCount = 0;
+        exchangePruneCount = 0;
         int maxPly = 4;
-        // Drop search depth as less time remains
-        if (timer.MillisecondsRemaining < 1) {
-            maxPly = 1;
-            exchangeDepth = 0;
-        } else if (timer.MillisecondsRemaining < 10) {
-            maxPly = 2;
-            exchangeDepth = 1;
-        } else if (timer.MillisecondsRemaining < 30) {
-            maxPly = 3;
-            exchangeDepth = 2;
-        }
+        // // Drop search depth as less time remains
+        // if (timer.MillisecondsRemaining < 1) {
+        //     maxPly = 1;
+        //     exchangeDepth = 0;
+        // } else if (timer.MillisecondsRemaining < 10) {
+        //     maxPly = 2;
+        //     exchangeDepth = 1;
+        // } else if (timer.MillisecondsRemaining < 30) {
+        //     maxPly = 3;
+        //     exchangeDepth = 2;
+        // }
         
         this.board = board;
-        // Console.WriteLine($"---- NEW THINK {board.GetFenString()}");
-        int curScore = Evaluate(board);
+        Console.WriteLine($"---- NEW THINK {board.GetFenString()}");
+        int curScore = Evaluate(negInf, posInf);
+        // Console.WriteLine($"Score before any moves {curScore}");
         (int bestScore, Move moveToPlay, Move expected_response) = Search(maxPly, negInf, posInf);
         // Console.WriteLine(board.GetFenString());
-        Console.WriteLine($"Searched {moveCount} moves (pruned {pruneCount}) in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response}");
+        Console.WriteLine($"Searched {moveCount} moves / {exchangeCount} exchanges in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response} - (pruned {pruneCount}, exchanges pruned {exchangePruneCount})");
 
         return moveToPlay;
         
