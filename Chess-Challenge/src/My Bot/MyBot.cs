@@ -183,14 +183,15 @@ public class MyBot : IChessBot
         // Decide ply based on time left
         int maxPly = board.PlyCount < 5 ? 4 : 5; // Start with lower ply for first few moves
         // Drop search depth as less time remains
-        if (timer.MillisecondsRemaining < 1) {
+        if (timer.MillisecondsRemaining < 1_000) {
+            // Time for hope chess.
             maxPly = 1;
             exchangeDepth = 0;
-        } else if (timer.MillisecondsRemaining < 10) {
-            maxPly = 2;
-            exchangeDepth = 1;
-        } else if (timer.MillisecondsRemaining < 30) {
+        } else if (timer.MillisecondsRemaining < 10_000) {
             maxPly = 3;
+            exchangeDepth = 1;
+        } else if (timer.MillisecondsRemaining < 30_000) {
+            maxPly = 4;
             exchangeDepth = 2;
         }
         // If only a few pieces left, go deep and hope to find a win/loss.
