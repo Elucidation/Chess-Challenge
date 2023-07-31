@@ -106,7 +106,20 @@ public class MyBot : IChessBot
         }
         return alpha;
     }
-
+    
+    public int ScoreMove(Move move) {
+        // Score the move with some arbitrary heuristic for ordering which moves to check first.
+        int score = 0;
+        // Captures are valuable
+        score += move.IsPromotion ? 300_000 : 0;
+        score += move.IsCapture ? 200_000 : 0;
+        score += move.IsCastles ? 200_000 : 0;
+        score += move.IsEnPassant ? 100_000 : 0;
+        score += pieceValues[(int)move.MovePieceType]; // Bigger pieces are higher on the list
+        // Note: This'll probably draw/deadlock endgames with few pieces
+        // since pawn moves are last here and the 4/5 ply is often too little to reach the end
+        return score;
+    }
     // Use negamax search
     public (int, Move, Move) Search(int maxPly, int alpha, int beta)
     {
@@ -116,6 +129,8 @@ public class MyBot : IChessBot
         }
         // Evaluate score of board assuming optimal choices up to a maxPly.
         Move[] allMoves = board.GetLegalMoves();
+        // Sort moves 
+        Array.Sort(allMoves, (move1, move2) => ScoreMove(move2).CompareTo(ScoreMove(move1)));
         Move moveToPlay = allMoves[0]; // If all moves are losing, just play first one.
         Move expected_response = Move.NullMove;
         String side = board.IsWhiteToMove ? "WHITE" : "BLACK";
@@ -153,9 +168,9 @@ public class MyBot : IChessBot
         }
         return (alpha, moveToPlay, expected_response);
     }
-    // public int getPieceCount() {
-    //     return System.Numerics.BitOperations.PopCount(board.AllPiecesBitboard);
-    // }
+    public int getPieceCount() {
+        return System.Numerics.BitOperations.PopCount(board.AllPiecesBitboard);
+    }
 
     public Move Think(Board board, Timer timer)
     {
@@ -164,8 +179,9 @@ public class MyBot : IChessBot
         pruneCount = 0;
         exchangeCount = 0;
         exchangePruneCount = 0;
-        int maxPly = 4;
-        // TODO: Move Ordering for better pruning, aim for higher ply.
+
+        // Decide ply based on time left
+        int maxPly = board.PlyCount < 5 ? 4 : 5; // Start with lower ply for first few moves
         // Drop search depth as less time remains
         if (timer.MillisecondsRemaining < 1) {
             maxPly = 1;
@@ -177,19 +193,18 @@ public class MyBot : IChessBot
             maxPly = 3;
             exchangeDepth = 2;
         }
-        // // If less than 10 pieces left, go as deep as we want
-        // if (getPieceCount() < 10) {
-        //     maxPly = 8;
-        //     exchangeDepth=1_000;
-        // }
+        // If only a few pieces left, go deep and hope to find a win/loss.
+        if (getPieceCount() <= 5) {
+            maxPly = 10;
+            exchangeDepth=1_000;
+        }
         
-        
-        Console.WriteLine($"---- NEW THINK PLY {maxPly} exchangeDepth {exchangeDepth} - {board.GetFenString()} ");
+        // Console.WriteLine($"---- NEW THINK PLY {maxPly} exchangeDepth {exchangeDepth} - {board.GetFenString()} ");
         int curScore = Evaluate(negInf, posInf);
         // Console.WriteLine($"Score before any moves {curScore}");
         (int bestScore, Move moveToPlay, Move expected_response) = Search(maxPly, negInf, posInf);
         // Console.WriteLine(board.GetFenString());
-        Console.WriteLine($"Searched {moveCount} moves / {exchangeCount} exchanges in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response} - (pruned {pruneCount}, exchanges pruned {exchangePruneCount})");
+        // Console.WriteLine($"Searched {moveCount} moves / {exchangeCount} exchanges in {timer.MillisecondsElapsedThisTurn} ms- Chose {moveToPlay} score {curScore} -> {bestScore}, expecting {expected_response} - (pruned {pruneCount}, exchanges pruned {exchangePruneCount})");
 
         return moveToPlay;
     }
